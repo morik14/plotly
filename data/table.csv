@@ -1,5 +1,5 @@
-carrier,parts_cd
-a,12
-b,13
-c,15
-c,17
+carrier,parts_cd,repair,repair_cumsum,stock
+a,12,4,15,40
+b,13,6,12,30
+c,15,7,34,32
+c,17,2,12,50

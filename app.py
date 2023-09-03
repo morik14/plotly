@@ -6,6 +6,7 @@ import dash_ag_grid as dag
 import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
+from plotly.subplots import make_subplots
 import numpy as np
 import pandas as pd
 
@@ -43,7 +44,6 @@ def generate_table():
     defaultColDef = {
         "flex": 1,
         "minWidth": 100,
-        # "resizable": True,
         "sortable": True, 
         "filter": True,
         "floatingFilter": True
@@ -59,7 +59,7 @@ def generate_table():
     )
     
 
-app.layout = dbc.Container(
+layout = dbc.Container(
     fluid=True,
     className="p-5",
     children=[
@@ -70,11 +70,58 @@ app.layout = dbc.Container(
 )
 
 
+layout2 = dbc.Container(
+    fluid=True,
+    className="p-5",
+    children=[
+        generate_table(),
+        html.Hr(),
+        
+        dbc.Card(
+            body=True,
+            children=[
+                dbc.Row(
+                    children=[
+                        dbc.Col(
+                            children=[
+                                dbc.Label("Shared x:"),
+                                dcc.RadioItems(
+                                    id='sharedx', value=False, inline=True,
+                                    options=[{'label': 'on', 'value': True}, 
+                                            {'label': 'off', 'value': False}],
+                                ),
+                            ]
+                        ),
+                        dbc.Col(
+                            children=[
+                                dbc.Label("Show pred:"),
+                                dcc.RadioItems(
+                                    id='show-pred', value=False, inline=True,
+                                    options=[{'label': 'on', 'value': True}, 
+                                            {'label': 'off', 'value': False}],
+                                ),
+                            ]
+                        ),
+                    ]
+                ),
+            ]
+        ),
+        
+        html.Div(id="datatable-interactivity-container")
+    ]
+)
+
+
+app.layout = layout2
+
+
 @callback(
     Output("datatable-interactivity-container", "children"),
     Input("datatable-interactivity", "selectedRows"),
+    Input("sharedx", "value"),
+    Input("show-pred", "value"),
 )
-def update_graphs(selected):
+def update_graphs(selected, sharedx, show_pred):
     if not selected:
         return 'No data selected'
 
@@ -86,69 +133,95 @@ def update_graphs(selected):
 
     columnDefs = [
         {"field": "key"},
-        {"field": "value"},
+        {"field": "value"}
+        
     ]
 
     defaultColDef = {
         "flex": 1,
     }
 
+    print(selected)
     graphs = []
-    for i, s in enumerate(selected):
-        carrier = s['carrier']
-        parts_cd = s['parts_cd']
-        sdf_table = df_table[(df_table['carrier'] == carrier) & (df_table['parts_cd'] == parts_cd)]
-        sdf_repair = df_repair[(df_repair['carrier'] == carrier) & (df_repair['parts_cd'] == parts_cd)]
-        sdf_stock = df_stock[(df_stock['carrier'] == carrier) & (df_stock['parts_cd'] == parts_cd)]
-        last_stock = sdf_stock.iloc[-1]['stock']
+    if sharedx:
+        fig = make_subplots(rows=len(selected), cols=1,
+                    shared_xaxes=True,
+                    vertical_spacing=0.02)
+        for i, s in enumerate(selected):
+            carrier = s['carrier']
+            parts_cd = s['parts_cd']
+            sdf_table = df_table[(df_table['carrier'] == carrier) & (df_table['parts_cd'] == parts_cd)]
+            sdf_repair = df_repair[(df_repair['carrier'] == carrier) & (df_repair['parts_cd'] == parts_cd)]
+            sdf_stock = df_stock[(df_stock['carrier'] == carrier) & (df_stock['parts_cd'] == parts_cd)]
+            last_date = sdf_stock.iloc[-1]['date']
+            last_stock = sdf_stock.iloc[-1]['stock']
 
-        df_pred = calc_sma(sdf_repair, last_stock, n_days=2, periods=5)
+            
 
-        fig = go.Figure()
-        fig.add_trace(
-            go.Bar(
-                x=sdf_repair['date'],
-                y=sdf_repair['repair_cumsum'],
-                name='repair(actual)',
-                marker_color='rgb(220, 57, 18)',
+            fig.add_trace(
+                go.Bar(
+                    x=sdf_repair['date'],
+                    y=sdf_repair['repair_cumsum'],
+                    name='repair(actual)',
+                    marker_color='rgb(220, 57, 18)',
+                ), row=i+1, col=1
             )
-        )
-        fig.add_trace(
-            go.Bar(
-                x=df_pred['date'],
-                y=df_pred['repair_cumsum'],
-                name='repair(pred)',
-                marker_color='rgb(254, 203, 82)',
+            fig.add_trace(
+                go.Scatter(
+                    x=sdf_stock['date'],
+                    y=sdf_stock['stock'],
+                    name='stock(actual)',
+                    mode='none',
+                    line_shape = 'hvh',
+                    fill='tozeroy',
+                    fillcolor='rgba(16, 150, 24, 0.6)',
+                    opacity=0.5
+                ), row=i+1, col=1
             )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=sdf_stock['date'],
-                y=sdf_stock['stock'],
-                name='stock(actual)',
-                mode='none',
-                line_shape = 'hvh',
-                fill='tozeroy',
-                fillcolor='rgba(16, 150, 24, 0.6)',
-                opacity=0.5
+
+            if show_pred:
+                df_pred = calc_sma(sdf_repair, last_stock, n_days=2, periods=5)
+
+                fig.add_trace(
+                    go.Bar(
+                        x=df_pred['date'],
+                        y=df_pred['repair_cumsum'],
+                        name='repair(pred)',
+                        marker_color='rgb(254, 203, 82)',
+                    ), row=i+1, col=1
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=df_pred['date'],
+                        y=df_pred['stock'],
+                        name='stock(pred)',
+                        mode='none',
+                        line_shape = 'hvh',
+                        fill='tozeroy',
+                        fillcolor='rgba(171, 99, 250, 0.6)',
+                        opacity=0.5
+                    ), row=i+1, col=1
+                )
+
+            # 個々のグラフ設定
+            fig.update_yaxes(
+                title=f'{carrier}<br>{parts_cd}',
+                row=i+1, col=1
             )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=df_pred['date'],
-                y=df_pred['stock'],
-                name='stock(pred)',
-                mode='none',
-                line_shape = 'hvh',
-                fill='tozeroy',
-                fillcolor='rgba(171, 99, 250, 0.6)',
-                opacity=0.5
+            fig.update_xaxes(
+                dtick="M1",
+                tickformat="%Y\n%m\n%d",
+                ticklabelmode="period",
+                row=i+1, col=1
             )
-        )
+            fig.add_annotation(
+                x=last_date,
+                y=last_stock,
+                text=str(last_stock),
+                row=i+1, col=1
+            )
+        
         fig.update_xaxes(
-            dtick="M1",
-            tickformat="%Y-%m-%d",
-            ticklabelmode="period",
             rangeselector=dict(
                 buttons=list([
                     dict(count=1, label="1m", step="month", stepmode="backward"),
@@ -156,46 +229,141 @@ def update_graphs(selected):
                     dict(count=1, label="1y", step="year", stepmode="backward"),
                     dict(step="all")
                 ])
-            )
+            ), row=1, col=1
+        )
+        fig.update_xaxes(
+            dtick="M1",
+            tickformat="%m\n%Y",
+            ticklabelmode="period",
+            showspikes=True,
+            spikesnap="cursor", 
+            spikemode="across",
+            minor=dict(ticks="inside", showgrid=True)
         )
         fig.update_layout(
-            hovermode="x unified"
-        )
-
-        graph = dcc.Graph(figure=fig)
-
-        tdf = sdf_table.T.reset_index()
-        tdf.columns = ['key', 'value']
-        table = dag.AgGrid(
-            columnDefs=columnDefs,
-            rowData=tdf.to_dict("records"),
-            dashGridOptions={"rowSelection": "multiple"},
-            defaultColDef=defaultColDef
-        )
-
-        graphs.append(
-            dbc.Container(
-                fluid=True,
-                children=[
-                    dbc.Row(
-                        className="mb-4",
-                        align='center',
-                        children=[
-                            dbc.Col(
-                                width=3,
-                                className="h-100",
-                                children=dbc.Card(body=True, children=table)
-                            ),
-                            dbc.Col(
-                                width=9,
-                                className="h-100",
-                                children=dbc.Card(body=True, children=graph)
-                            ),
-                        ]
-                    )
-                ]
+            showlegend=False,
+            height=200*(len(selected)+1), 
+            hovermode="x unified",
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1,
+                bgcolor='rgba(0,0,0,0)',
             )
         )
+        return dcc.Graph(figure=fig),
+    else:    
+        for i, s in enumerate(selected):
+            carrier = s['carrier']
+            parts_cd = s['parts_cd']
+            sdf_table = df_table[(df_table['carrier'] == carrier) & (df_table['parts_cd'] == parts_cd)]
+            sdf_repair = df_repair[(df_repair['carrier'] == carrier) & (df_repair['parts_cd'] == parts_cd)]
+            sdf_stock = df_stock[(df_stock['carrier'] == carrier) & (df_stock['parts_cd'] == parts_cd)]
+            last_stock = sdf_stock.iloc[-1]['stock']
+
+            df_pred = calc_sma(sdf_repair, last_stock, n_days=2, periods=5)
+
+            fig = go.Figure()
+            fig.add_trace(
+                go.Bar(
+                    x=sdf_repair['date'],
+                    y=sdf_repair['repair_cumsum'],
+                    name='repair(actual)',
+                    marker_color='rgb(220, 57, 18)',
+                )
+            )
+            fig.add_trace(
+                go.Bar(
+                    x=df_pred['date'],
+                    y=df_pred['repair_cumsum'],
+                    name='repair(pred)',
+                    marker_color='rgb(254, 203, 82)',
+                )
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=sdf_stock['date'],
+                    y=sdf_stock['stock'],
+                    name='stock(actual)',
+                    mode='none',
+                    line_shape = 'hvh',
+                    fill='tozeroy',
+                    fillcolor='rgba(16, 150, 24, 0.6)',
+                    opacity=0.5
+                )
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=df_pred['date'],
+                    y=df_pred['stock'],
+                    name='stock(pred)',
+                    mode='none',
+                    line_shape = 'hvh',
+                    fill='tozeroy',
+                    fillcolor='rgba(171, 99, 250, 0.6)',
+                    opacity=0.5
+                )
+            )
+            fig.update_xaxes(
+                dtick="M1",
+                tickformat="%Y-%m-%d",
+                ticklabelmode="period",
+                rangeselector=dict(
+                    buttons=list([
+                        dict(count=1, label="1m", step="month", stepmode="backward"),
+                        dict(count=6, label="6m", step="month", stepmode="backward"),
+                        dict(count=1, label="1y", step="year", stepmode="backward"),
+                        dict(step="all")
+                    ])
+                )
+            )
+            fig.update_layout(
+                hovermode="x unified",
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1,
+                    bgcolor='rgba(0,0,0,0)',
+                )
+            )
+
+            graph = dcc.Graph(figure=fig)
+
+            tdf = sdf_table.T.reset_index()
+            tdf.columns = ['key', 'value']
+            table = dag.AgGrid(
+                columnDefs=columnDefs,
+                rowData=tdf.to_dict("records"),
+                dashGridOptions={"rowSelection": "multiple", "headerHeight":0},
+                defaultColDef=defaultColDef
+            )
+
+            graphs.append(
+                html.Div(
+                    children=[
+                        dbc.Row(
+                            className="mb-4",
+                            align='center',
+                            children=[
+                                dbc.Col(
+                                    width=3,
+                                    className="h-100",
+                                    children=table
+                                ),
+                                dbc.Col(
+                                    width=9,
+                                    className="h-100",
+                                    children=graph
+                                ),
+                            ]
+                        )
+                    ]
+                )
+            )
 
     return graphs
 
